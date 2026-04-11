@@ -80,6 +80,10 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.requireAuth(s.handleLogs)(w, r)
 		return
 	}
+	if r.URL.Path == "/api/admins" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleAdmins)(w, r)
+		return
+	}
 	writeJSON(w, http.StatusNotFound, apiError{Error: "接口不存在"})
 }
 
@@ -638,6 +642,34 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request, _ authedUser
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
+	})
+}
+
+func (s *server) handleAdmins(w http.ResponseWriter, r *http.Request, _ authedUser) {
+	rows, err := s.db.Query(`SELECT id, username, updated_at FROM admins ORDER BY id`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询管理员列表失败"})
+		return
+	}
+	defer rows.Close()
+
+	type adminItem struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		UpdatedAt string `json:"updated_at"`
+	}
+
+	items := make([]adminItem, 0)
+	for rows.Next() {
+		var item adminItem
+		if err = rows.Scan(&item.ID, &item.Username, &item.UpdatedAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取管理员数据失败"})
+			return
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items": items,
 	})
 }
 

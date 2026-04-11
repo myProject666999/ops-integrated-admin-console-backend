@@ -80,6 +80,62 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.requireAuth(s.handleLogs)(w, r)
 		return
 	}
+	if r.URL.Path == "/api/rbac/roles" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleRoleList)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/rbac/roles" && r.Method == http.MethodPost {
+		s.requireAuth(s.handleRoleCreate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/roles/") && strings.HasSuffix(r.URL.Path, "/menus") && r.Method == http.MethodGet {
+		s.requireAuth(s.handleGetRoleMenus)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/roles/") && strings.HasSuffix(r.URL.Path, "/menus") && r.Method == http.MethodPost {
+		s.requireAuth(s.handleAssignRoleMenus)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/roles/") && r.Method == http.MethodPut {
+		s.requireAuth(s.handleRoleUpdate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/roles/") && r.Method == http.MethodDelete {
+		s.requireAuth(s.handleRoleDelete)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/rbac/menus" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleMenuList)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/rbac/menus" && r.Method == http.MethodPost {
+		s.requireAuth(s.handleMenuCreate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/menus/") && r.Method == http.MethodPut {
+		s.requireAuth(s.handleMenuUpdate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/menus/") && r.Method == http.MethodDelete {
+		s.requireAuth(s.handleMenuDelete)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/users/") && strings.HasSuffix(r.URL.Path, "/roles") && r.Method == http.MethodGet {
+		s.requireAuth(s.handleGetUserRoles)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/users/") && strings.HasSuffix(r.URL.Path, "/roles") && r.Method == http.MethodPost {
+		s.requireAuth(s.handleAssignUserRoles)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/rbac/users/") && strings.HasSuffix(r.URL.Path, "/menus") && r.Method == http.MethodGet {
+		s.requireAuth(s.handleGetUserMenus)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/rbac/me/menus" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleGetCurrentUserMenus)(w, r)
+		return
+	}
 	writeJSON(w, http.StatusNotFound, apiError{Error: "接口不存在"})
 }
 

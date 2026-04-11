@@ -47,6 +47,41 @@ func initDB(db *sql.DB, cfg appConfig) error {
 			detail TEXT,
 			created_at TEXT NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS roles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS menus (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			path TEXT NOT NULL,
+			icon TEXT DEFAULT '',
+			parent_id INTEGER DEFAULT 0,
+			sort_order INTEGER DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS role_menu (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			role_id INTEGER NOT NULL,
+			menu_id INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(role_id, menu_id),
+			FOREIGN KEY(role_id) REFERENCES roles(id) ON DELETE CASCADE,
+			FOREIGN KEY(menu_id) REFERENCES menus(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS user_role (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			role_id INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(user_id, role_id),
+			FOREIGN KEY(user_id) REFERENCES admins(id) ON DELETE CASCADE,
+			FOREIGN KEY(role_id) REFERENCES roles(id) ON DELETE CASCADE
+		);`,
 	}
 	for _, stmt := range schema {
 		if _, err := db.Exec(stmt); err != nil {
@@ -70,6 +105,56 @@ func initDB(db *sql.DB, cfg appConfig) error {
 	if err = encryptLegacyProjectCredentialPasswords(db, cfg.CredentialKey); err != nil {
 		return err
 	}
+	if err = initDefaultRolesAndMenus(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func initDefaultRolesAndMenus(db *sql.DB) error {
+	now := nowStr()
+
+	_, err := db.Exec(`INSERT OR IGNORE INTO roles (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		1, "超级管理员", "系统超级管理员，拥有所有权限", now, now)
+	if err != nil {
+		return err
+	}
+
+	menus := []struct {
+		id       int
+		name     string
+		path     string
+		icon     string
+		parentID int
+		sort     int
+	}{
+		{1, "仪表盘", "/dashboard", "DashboardOutlined", 0, 1},
+		{2, "AD管理", "/ad", "TeamOutlined", 0, 2},
+		{3, "打印管理", "/print", "PrinterOutlined", 0, 3},
+		{4, "VPN管理", "/vpn", "GlobalOutlined", 0, 4},
+		{5, "系统管理", "/system", "SettingOutlined", 0, 5},
+		{6, "用户管理", "/system/users", "UserOutlined", 5, 1},
+		{7, "角色管理", "/system/roles", "SafetyOutlined", 5, 2},
+		{8, "菜单管理", "/system/menus", "MenuOutlined", 5, 3},
+		{9, "操作日志", "/system/logs", "FileTextOutlined", 5, 4},
+	}
+
+	for _, m := range menus {
+		_, err := db.Exec(`INSERT OR IGNORE INTO menus (id, name, path, icon, parent_id, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			m.id, m.name, m.path, m.icon, m.parentID, m.sort, now, now)
+		if err != nil {
+			return err
+		}
+	}
+
+	for i := 1; i <= 9; i++ {
+		_, err := db.Exec(`INSERT OR IGNORE INTO role_menu (role_id, menu_id, created_at) VALUES (?, ?, ?)`,
+			1, i, now)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

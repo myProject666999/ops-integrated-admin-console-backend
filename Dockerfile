@@ -1,30 +1,27 @@
-FROM golang:1.26-alpine AS builder
+# 使用 Windows Server Core 作为基础镜像
+FROM golang:1.26-windowsservercore-ltsc2022 AS builder
 
 WORKDIR /app
-
-RUN apk add --no-cache gcc musl-dev
 
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o /ops-admin-backend .
+RUN go build -buildvcs=false -o ops-admin-backend.exe .
 
-FROM alpine:3.19
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata
-
-COPY --from=builder /ops-admin-backend .
+COPY --from=builder /app/ops-admin-backend.exe .
 COPY --from=builder /app/data ./data
 
-RUN mkdir -p /app/db
+RUN mkdir db
 
 ENV ADDR=0.0.0.0:8080
 ENV TZ=Asia/Shanghai
 
 EXPOSE 8080
 
-CMD ["./ops-admin-backend"]
+CMD ["ops-admin-backend.exe"]

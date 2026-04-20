@@ -47,6 +47,43 @@ func initDB(db *sql.DB, cfg appConfig) error {
 			detail TEXT,
 			created_at TEXT NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS roles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT NOT NULL DEFAULT '',
+			status INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS menus (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			parent_id INTEGER NOT NULL DEFAULT 0,
+			name TEXT NOT NULL,
+			path TEXT NOT NULL DEFAULT '',
+			icon TEXT NOT NULL DEFAULT '',
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			status INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS role_menu (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			role_id INTEGER NOT NULL,
+			menu_id INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(role_id, menu_id),
+			FOREIGN KEY(role_id) REFERENCES roles(id) ON DELETE CASCADE,
+			FOREIGN KEY(menu_id) REFERENCES menus(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS role_user (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			role_id INTEGER NOT NULL,
+			user_id INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(role_id, user_id),
+			FOREIGN KEY(role_id) REFERENCES roles(id) ON DELETE CASCADE,
+			FOREIGN KEY(user_id) REFERENCES admins(id) ON DELETE CASCADE
+		);`,
 	}
 	for _, stmt := range schema {
 		if _, err := db.Exec(stmt); err != nil {

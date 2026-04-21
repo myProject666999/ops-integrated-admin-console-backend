@@ -80,6 +80,66 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.requireAuth(s.handleLogs)(w, r)
 		return
 	}
+
+	if r.URL.Path == "/api/roles" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleRolesList)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/roles" && r.Method == http.MethodPost {
+		s.requireAuth(s.handleRoleCreate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/roles/") && r.Method == http.MethodGet && !strings.HasSuffix(r.URL.Path, "/menus") {
+		s.requireAuth(s.handleRoleGet)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/roles/") && r.Method == http.MethodPut && !strings.HasSuffix(r.URL.Path, "/menus") {
+		s.requireAuth(s.handleRoleUpdate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/roles/") && r.Method == http.MethodDelete {
+		s.requireAuth(s.handleRoleDelete)(w, r)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/menus") && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/roles/") {
+		s.requireAuth(s.handleRoleMenusGet)(w, r)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/menus") && r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/roles/") {
+		s.requireAuth(s.handleRoleMenusUpdate)(w, r)
+		return
+	}
+
+	if r.URL.Path == "/api/menus" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleMenusList)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/menus" && r.Method == http.MethodPost {
+		s.requireAuth(s.handleMenuCreate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/menus/") && r.Method == http.MethodPut {
+		s.requireAuth(s.handleMenuUpdate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/menus/") && r.Method == http.MethodDelete {
+		s.requireAuth(s.handleMenuDelete)(w, r)
+		return
+	}
+
+	if strings.HasSuffix(r.URL.Path, "/roles") && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/users/") {
+		s.requireAuth(s.handleUserRolesGet)(w, r)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/roles") && r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/users/") {
+		s.requireAuth(s.handleUserRolesUpdate)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/users/menus" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleUserMenus)(w, r)
+		return
+	}
+
 	writeJSON(w, http.StatusNotFound, apiError{Error: "接口不存在"})
 }
 

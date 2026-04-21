@@ -80,6 +80,10 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.requireAuth(s.handleLogs)(w, r)
 		return
 	}
+	if r.URL.Path == "/api/admins" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleAdminsList)(w, r)
+		return
+	}
 	writeJSON(w, http.StatusNotFound, apiError{Error: "接口不存在"})
 }
 
@@ -864,4 +868,27 @@ func formatUnixMilliForLog(ms int64) string {
 		return "-"
 	}
 	return time.UnixMilli(ms).Format(time.RFC3339)
+}
+
+func (s *server) handleAdminsList(w http.ResponseWriter, r *http.Request, _ authedUser) {
+	rows, err := s.db.Query(`SELECT id,username,updated_at FROM admins ORDER BY id ASC`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询管理员列表失败"})
+		return
+	}
+	defer rows.Close()
+
+	items := make([]adminRow, 0)
+	for rows.Next() {
+		var row adminRow
+		if err = rows.Scan(&row.ID, &row.Username, &row.UpdatedAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取管理员数据失败"})
+			return
+		}
+		items = append(items, row)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items": items,
+		"total": len(items),
+	})
 }

@@ -103,6 +103,12 @@ type logRow struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type adminRow struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type browserCloseState struct {
 	user         authedUser
 	req          browserCloseEventReq

@@ -80,6 +80,62 @@ func (s *server) route(w http.ResponseWriter, r *http.Request) {
 		s.requireAuth(s.handleLogs)(w, r)
 		return
 	}
+	if r.URL.Path == "/api/roles" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleRoleList)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/roles" && r.Method == http.MethodPost {
+		s.requireAuth(s.handleRoleCreate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/roles/") && r.Method == http.MethodPut && !strings.Contains(r.URL.Path, "/menus") {
+		s.requireAuth(s.handleRoleUpdate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/roles/") && r.Method == http.MethodDelete && !strings.Contains(r.URL.Path, "/menus") {
+		s.requireAuth(s.handleRoleDelete)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/menus" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleMenuList)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/menus" && r.Method == http.MethodPost {
+		s.requireAuth(s.handleMenuCreate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/menus/") && r.Method == http.MethodPut {
+		s.requireAuth(s.handleMenuUpdate)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/menus/") && r.Method == http.MethodDelete {
+		s.requireAuth(s.handleMenuDelete)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/roles/") && strings.HasSuffix(r.URL.Path, "/menus") && r.Method == http.MethodGet {
+		s.requireAuth(s.handleRoleMenus)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/roles/") && strings.HasSuffix(r.URL.Path, "/menus") && r.Method == http.MethodPost {
+		s.requireAuth(s.handleRoleAssignMenus)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/users/") && strings.HasSuffix(r.URL.Path, "/roles") && r.Method == http.MethodGet {
+		s.requireAuth(s.handleUserRoles)(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/users/") && strings.HasSuffix(r.URL.Path, "/roles") && r.Method == http.MethodPost {
+		s.requireAuth(s.handleUserAssignRoles)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/users" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleUserList)(w, r)
+		return
+	}
+	if r.URL.Path == "/api/auth/menus" && r.Method == http.MethodGet {
+		s.requireAuth(s.handleUserMenus)(w, r)
+		return
+	}
 	writeJSON(w, http.StatusNotFound, apiError{Error: "接口不存在"})
 }
 
@@ -864,4 +920,528 @@ func formatUnixMilliForLog(ms int64) string {
 		return "-"
 	}
 	return time.UnixMilli(ms).Format(time.RFC3339)
+}
+
+func (s *server) handleRoleList(w http.ResponseWriter, r *http.Request, _ authedUser) {
+	page := 1
+	pageSize := 20
+
+	if v := strings.TrimSpace(r.URL.Query().Get("page")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			page = n
+		}
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("page_size")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			pageSize = n
+		}
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM roles`).Scan(&total); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询角色失败"})
+		return
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := s.db.Query(`SELECT id,name,description,status,created_at,updated_at FROM roles ORDER BY id DESC LIMIT ? OFFSET ?`, pageSize, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询角色失败"})
+		return
+	}
+	defer rows.Close()
+
+	items := make([]roleRow, 0)
+	for rows.Next() {
+		var row roleRow
+		if err = rows.Scan(&row.ID, &row.Name, &row.Description, &row.Status, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取角色失败"})
+			return
+		}
+		items = append(items, row)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items":     items,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+func (s *server) handleRoleCreate(w http.ResponseWriter, r *http.Request, u authedUser) {
+	var req createRoleReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "请求体格式错误"})
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "角色名称不能为空"})
+		return
+	}
+
+	now := nowStr()
+	res, err := s.db.Exec(`INSERT INTO roles(name,description,status,created_at,updated_at) VALUES(?,?,?,?,?)`,
+		req.Name, req.Description, req.Status, now, now)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			writeJSON(w, http.StatusConflict, apiError{Error: "角色名称已存在"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "创建角色失败"})
+		return
+	}
+
+	roleID, _ := res.LastInsertId()
+	s.logAction(u.ID, u.Username, "create_role", "", fmt.Sprintf("创建角色: %s", req.Name))
+	writeJSON(w, http.StatusOK, map[string]interface{}{"id": roleID, "message": "创建成功"})
+}
+
+func (s *server) handleRoleUpdate(w http.ResponseWriter, r *http.Request, u authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/roles/")
+	roleID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || roleID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的角色ID"})
+		return
+	}
+
+	var req updateRoleReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "请求体格式错误"})
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "角色名称不能为空"})
+		return
+	}
+
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM roles WHERE id=?`, roleID).Scan(&exists); err != nil || exists == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "角色不存在"})
+		return
+	}
+
+	_, err = s.db.Exec(`UPDATE roles SET name=?,description=?,status=?,updated_at=? WHERE id=?`,
+		req.Name, req.Description, req.Status, nowStr(), roleID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			writeJSON(w, http.StatusConflict, apiError{Error: "角色名称已存在"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "更新角色失败"})
+		return
+	}
+
+	s.logAction(u.ID, u.Username, "update_role", "", fmt.Sprintf("更新角色ID: %d", roleID))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "更新成功"})
+}
+
+func (s *server) handleRoleDelete(w http.ResponseWriter, r *http.Request, u authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/roles/")
+	roleID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || roleID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的角色ID"})
+		return
+	}
+
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM roles WHERE id=?`, roleID).Scan(&exists); err != nil || exists == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "角色不存在"})
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "事务开始失败"})
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.Exec(`DELETE FROM role_menu WHERE role_id=?`, roleID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "删除角色菜单关联失败"})
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM role_user WHERE role_id=?`, roleID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "删除用户角色关联失败"})
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM roles WHERE id=?`, roleID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "删除角色失败"})
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "提交事务失败"})
+		return
+	}
+
+	s.logAction(u.ID, u.Username, "delete_role", "", fmt.Sprintf("删除角色ID: %d", roleID))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "删除成功"})
+}
+
+func (s *server) handleMenuList(w http.ResponseWriter, r *http.Request, _ authedUser) {
+	rows, err := s.db.Query(`SELECT id,parent_id,name,path,icon,sort,status,permission,created_at,updated_at FROM menus ORDER BY sort ASC, id ASC`)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询菜单失败"})
+		return
+	}
+	defer rows.Close()
+
+	items := make([]menuRow, 0)
+	for rows.Next() {
+		var row menuRow
+		if err = rows.Scan(&row.ID, &row.ParentID, &row.Name, &row.Path, &row.Icon, &row.Sort, &row.Status, &row.Permission, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取菜单失败"})
+			return
+		}
+		items = append(items, row)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
+}
+
+func (s *server) handleMenuCreate(w http.ResponseWriter, r *http.Request, u authedUser) {
+	var req createMenuReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "请求体格式错误"})
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "菜单名称不能为空"})
+		return
+	}
+
+	now := nowStr()
+	res, err := s.db.Exec(`INSERT INTO menus(parent_id,name,path,icon,sort,status,permission,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+		req.ParentID, req.Name, req.Path, req.Icon, req.Sort, req.Status, req.Permission, now, now)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "创建菜单失败"})
+		return
+	}
+
+	menuID, _ := res.LastInsertId()
+	s.logAction(u.ID, u.Username, "create_menu", "", fmt.Sprintf("创建菜单: %s", req.Name))
+	writeJSON(w, http.StatusOK, map[string]interface{}{"id": menuID, "message": "创建成功"})
+}
+
+func (s *server) handleMenuUpdate(w http.ResponseWriter, r *http.Request, u authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/menus/")
+	menuID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || menuID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的菜单ID"})
+		return
+	}
+
+	var req updateMenuReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "请求体格式错误"})
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "菜单名称不能为空"})
+		return
+	}
+
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM menus WHERE id=?`, menuID).Scan(&exists); err != nil || exists == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "菜单不存在"})
+		return
+	}
+
+	_, err = s.db.Exec(`UPDATE menus SET parent_id=?,name=?,path=?,icon=?,sort=?,status=?,permission=?,updated_at=? WHERE id=?`,
+		req.ParentID, req.Name, req.Path, req.Icon, req.Sort, req.Status, req.Permission, nowStr(), menuID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "更新菜单失败"})
+		return
+	}
+
+	s.logAction(u.ID, u.Username, "update_menu", "", fmt.Sprintf("更新菜单ID: %d", menuID))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "更新成功"})
+}
+
+func (s *server) handleMenuDelete(w http.ResponseWriter, r *http.Request, u authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/menus/")
+	menuID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || menuID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的菜单ID"})
+		return
+	}
+
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM menus WHERE id=?`, menuID).Scan(&exists); err != nil || exists == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "菜单不存在"})
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "事务开始失败"})
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.Exec(`DELETE FROM role_menu WHERE menu_id=?`, menuID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "删除角色菜单关联失败"})
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM menus WHERE id=?`, menuID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "删除菜单失败"})
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "提交事务失败"})
+		return
+	}
+
+	s.logAction(u.ID, u.Username, "delete_menu", "", fmt.Sprintf("删除菜单ID: %d", menuID))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "删除成功"})
+}
+
+func (s *server) handleRoleMenus(w http.ResponseWriter, r *http.Request, _ authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/roles/")
+	idStr = strings.TrimSuffix(idStr, "/menus")
+	roleID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || roleID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的角色ID"})
+		return
+	}
+
+	rows, err := s.db.Query(`SELECT menu_id FROM role_menu WHERE role_id=?`, roleID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询角色菜单失败"})
+		return
+	}
+	defer rows.Close()
+
+	menuIDs := make([]int64, 0)
+	for rows.Next() {
+		var menuID int64
+		if err = rows.Scan(&menuID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取菜单ID失败"})
+			return
+		}
+		menuIDs = append(menuIDs, menuID)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"menu_ids": menuIDs})
+}
+
+func (s *server) handleRoleAssignMenus(w http.ResponseWriter, r *http.Request, u authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/roles/")
+	idStr = strings.TrimSuffix(idStr, "/menus")
+	roleID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || roleID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的角色ID"})
+		return
+	}
+
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM roles WHERE id=?`, roleID).Scan(&exists); err != nil || exists == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "角色不存在"})
+		return
+	}
+
+	var req assignRoleMenusReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "请求体格式错误"})
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "事务开始失败"})
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.Exec(`DELETE FROM role_menu WHERE role_id=?`, roleID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "删除原有菜单权限失败"})
+		return
+	}
+
+	now := nowStr()
+	for _, menuID := range req.MenuIDs {
+		if _, err = tx.Exec(`INSERT INTO role_menu(role_id, menu_id, created_at) VALUES(?, ?, ?)`, roleID, menuID, now); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "分配菜单权限失败"})
+			return
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "提交事务失败"})
+		return
+	}
+
+	s.logAction(u.ID, u.Username, "assign_role_menus", "", fmt.Sprintf("角色ID: %d, 分配菜单数量: %d", roleID, len(req.MenuIDs)))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "分配成功"})
+}
+
+func (s *server) handleUserRoles(w http.ResponseWriter, r *http.Request, _ authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/users/")
+	idStr = strings.TrimSuffix(idStr, "/roles")
+	userID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || userID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的用户ID"})
+		return
+	}
+
+	rows, err := s.db.Query(`SELECT role_id FROM role_user WHERE user_id=?`, userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询用户角色失败"})
+		return
+	}
+	defer rows.Close()
+
+	roleIDs := make([]int64, 0)
+	for rows.Next() {
+		var roleID int64
+		if err = rows.Scan(&roleID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取角色ID失败"})
+			return
+		}
+		roleIDs = append(roleIDs, roleID)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"role_ids": roleIDs})
+}
+
+func (s *server) handleUserAssignRoles(w http.ResponseWriter, r *http.Request, u authedUser) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/users/")
+	idStr = strings.TrimSuffix(idStr, "/roles")
+	userID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || userID <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "无效的用户ID"})
+		return
+	}
+
+	var exists int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM admins WHERE id=?`, userID).Scan(&exists); err != nil || exists == 0 {
+		writeJSON(w, http.StatusNotFound, apiError{Error: "用户不存在"})
+		return
+	}
+
+	var req assignUserRolesReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, apiError{Error: "请求体格式错误"})
+		return
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "事务开始失败"})
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err = tx.Exec(`DELETE FROM role_user WHERE user_id=?`, userID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "删除原有用户角色失败"})
+		return
+	}
+
+	now := nowStr()
+	for _, roleID := range req.RoleIDs {
+		if _, err = tx.Exec(`INSERT INTO role_user(user_id, role_id, created_at) VALUES(?, ?, ?)`, userID, roleID, now); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "分配用户角色失败"})
+			return
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "提交事务失败"})
+		return
+	}
+
+	s.logAction(u.ID, u.Username, "assign_user_roles", "", fmt.Sprintf("用户ID: %d, 分配角色数量: %d", userID, len(req.RoleIDs)))
+	writeJSON(w, http.StatusOK, map[string]string{"message": "分配成功"})
+}
+
+func (s *server) handleUserList(w http.ResponseWriter, r *http.Request, _ authedUser) {
+	page := 1
+	pageSize := 20
+
+	if v := strings.TrimSpace(r.URL.Query().Get("page")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			page = n
+		}
+	}
+	if v := strings.TrimSpace(r.URL.Query().Get("page_size")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			pageSize = n
+		}
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(1) FROM admins`).Scan(&total); err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询用户失败"})
+		return
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := s.db.Query(`SELECT id,username,created_at,updated_at FROM admins ORDER BY id DESC LIMIT ? OFFSET ?`, pageSize, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询用户失败"})
+		return
+	}
+	defer rows.Close()
+
+	type userRow struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	items := make([]userRow, 0)
+	for rows.Next() {
+		var row userRow
+		if err = rows.Scan(&row.ID, &row.Username, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取用户失败"})
+			return
+		}
+		items = append(items, row)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items":     items,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+func (s *server) handleUserMenus(w http.ResponseWriter, r *http.Request, u authedUser) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT m.id,m.parent_id,m.name,m.path,m.icon,m.sort,m.status,m.permission,m.created_at,m.updated_at 
+		FROM menus m 
+		INNER JOIN role_menu rm ON m.id = rm.menu_id 
+		INNER JOIN role_user ru ON rm.role_id = ru.role_id 
+		WHERE ru.user_id = ? AND m.status = 1
+		ORDER BY m.sort ASC, m.id ASC`, u.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, apiError{Error: "查询用户菜单失败"})
+		return
+	}
+	defer rows.Close()
+
+	items := make([]menuRow, 0)
+	for rows.Next() {
+		var row menuRow
+		if err = rows.Scan(&row.ID, &row.ParentID, &row.Name, &row.Path, &row.Icon, &row.Sort, &row.Status, &row.Permission, &row.CreatedAt, &row.UpdatedAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, apiError{Error: "读取菜单失败"})
+			return
+		}
+		items = append(items, row)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": items})
 }

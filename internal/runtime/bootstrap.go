@@ -103,6 +103,68 @@ type logRow struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type roleRow struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      int    `json:"status"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+type menuRow struct {
+	ID         int64  `json:"id"`
+	ParentID   int64  `json:"parent_id"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Icon       string `json:"icon"`
+	Sort       int    `json:"sort"`
+	Status     int    `json:"status"`
+	Permission string `json:"permission"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+type createRoleReq struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      int    `json:"status"`
+}
+
+type updateRoleReq struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Status      int    `json:"status"`
+}
+
+type createMenuReq struct {
+	ParentID   int64  `json:"parent_id"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Icon       string `json:"icon"`
+	Sort       int    `json:"sort"`
+	Status     int    `json:"status"`
+	Permission string `json:"permission"`
+}
+
+type updateMenuReq struct {
+	ParentID   int64  `json:"parent_id"`
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Icon       string `json:"icon"`
+	Sort       int    `json:"sort"`
+	Status     int    `json:"status"`
+	Permission string `json:"permission"`
+}
+
+type assignRoleMenusReq struct {
+	MenuIDs []int64 `json:"menu_ids"`
+}
+
+type assignUserRolesReq struct {
+	RoleIDs []int64 `json:"role_ids"`
+}
+
 type browserCloseState struct {
 	user         authedUser
 	req          browserCloseEventReq
